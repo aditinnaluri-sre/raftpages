@@ -1,0 +1,266 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+/* ---------- theme variables ---------- */
+:root,
+[data-theme="dark"] {
+  --bg-void: #0B0F1A;
+  --panel: #111827;
+  --panel-alt: #0F1622;
+  --panel-raised: #161F32;
+  --panel-raised-hover: #1C2740;
+  --border: #232E45;
+  --border-alt: #1A2438;
+  --text-primary: #E7ECF5;
+  --text-muted: #7C8AA5;
+  --text-secondary: #A9B4C7;
+  --text-dim: #4A5872;
+  --text-body: #C4CCDB;
+  --accent: #5B8CFF;
+  --accent-hover: #4A7BEF;
+  --success: #3ECF8E;
+  --warning: #F0A93A;
+  --danger: #EF6B6B;
+  --danger-hover: #E15656;
+  --code-bg: #0B0F1A;
+  --code-text: #8FE3B0;
+  --overlay: rgba(11, 15, 26, 0.8);
+  --accent-10: rgba(91, 140, 255, 0.10);
+  --accent-15: rgba(91, 140, 255, 0.15);
+  --accent-30: rgba(91, 140, 255, 0.30);
+  --accent-50: rgba(91, 140, 255, 0.50);
+  --accent-60: rgba(91, 140, 255, 0.60);
+  --danger-50: rgba(239, 107, 107, 0.50);
+}
+
+[data-theme="light"] {
+  --bg-void: #F3F5F9;
+  --panel: #FFFFFF;
+  --panel-alt: #F7F9FC;
+  --panel-raised: #EEF1F7;
+  --panel-raised-hover: #E4E9F2;
+  --border: #D5DBE7;
+  --border-alt: #E2E7F0;
+  --text-primary: #0E1421;
+  --text-muted: #43536E;
+  --text-secondary: #26334A;
+  --text-dim: #75839B;
+  --text-body: #1C2739;
+  --accent: #3D6FE8;
+  --accent-hover: #2F5ED6;
+  --success: #178A5C;
+  --warning: #A96A0C;
+  --danger: #D63C3C;
+  --danger-hover: #C43535;
+  --code-bg: #0B0F1A;
+  --code-text: #8FE3B0;
+  --overlay: rgba(11, 15, 26, 0.6);
+  --accent-10: rgba(61, 111, 232, 0.10);
+  --accent-15: rgba(61, 111, 232, 0.15);
+  --accent-30: rgba(61, 111, 232, 0.30);
+  --accent-50: rgba(61, 111, 232, 0.50);
+  --accent-60: rgba(61, 111, 232, 0.60);
+  --danger-50: rgba(214, 60, 60, 0.50);
+}
+
+body {
+  background-color: var(--bg-void);
+}
+
+/* ---------- markdown content (RunbookBody) ---------- */
+/* Inline code vs. code blocks are distinguished purely by CSS cascade
+   (pre code overrides plain code) rather than a JS "inline" prop, since
+   that prop was removed in react-markdown v9 and detecting it reliably
+   in JS is fragile across versions. */
+.rb-content code {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0.1em 0.45em;
+  font-size: 14.5px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.rb-content pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+.rb-content pre code {
+  background: none;
+  border: none;
+  color: var(--code-text);
+  padding: 0;
+  border-radius: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.rb-content .code-block-wrapper {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.rb-content .code-block-wrapper pre {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0.75rem 1rem !important;
+  margin: 0 !important;
+  overflow-x: auto !important;
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
+}
+.rb-content .code-block-wrapper pre code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: var(--code-text) !important;
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
+}
+.rb-content table tbody tr:nth-child(even) {
+  background: var(--panel-alt);
+}
+
+/* nested ordered lists: 1,2,3 -> a,b,c -> i,ii,iii, matching common
+   document conventions (Google Docs, Confluence, etc.) */
+.rb-content ol { list-style-type: decimal; }
+.rb-content ol ol { list-style-type: lower-alpha; }
+.rb-content ol ol ol { list-style-type: lower-roman; }
+/* bullet lists — Tailwind's reset strips default bullets, so set them
+   explicitly (this was missing, which is why bullets didn't show) */
+.rb-content ul { list-style-type: disc; }
+.rb-content ul ul { list-style-type: circle; }
+.rb-content ul ul ul { list-style-type: square; }
+.rb-content ol ol,
+.rb-content ul ul {
+  margin-top: 0.5rem;
+}
+
+/* ---------- typography (Tiptap renders plain semantic HTML — no per-node
+   React styling anymore, so this carries the full visual load) ---------- */
+.rb-content { color: var(--text-body); font-size: 16.5px; line-height: 1.75; }
+.rb-content .ProseMirror { outline: none; min-height: 100%; }
+.rb-content h1 {
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--text-primary);
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+}
+.rb-content h2 {
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.rb-content h3 {
+  color: var(--text-primary);
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.rb-content p { margin-bottom: 1rem; }
+.rb-content p:last-child { margin-bottom: 0; }
+.rb-content strong { color: var(--text-primary); font-weight: 600; }
+.rb-content s { color: var(--text-muted); text-decoration: line-through; }
+.rb-content a { color: var(--accent); text-decoration: none; }
+.rb-content a:hover { text-decoration: underline; }
+.rb-content ul, .rb-content ol { margin-bottom: 1rem; padding-left: 1.5rem; }
+.rb-content li { margin-bottom: 0.4rem; }
+.rb-content li p { margin-bottom: 0; } /* tight lists — no extra gap inside items */
+.rb-content blockquote {
+  border-left: 2px solid var(--accent);
+  padding-left: 1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 1rem;
+}
+.rb-content table {
+  /* Tables start with auto layout and support resizable columns */
+  width: auto;
+  max-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+}
+.rb-content .ProseMirror table {
+  table-layout: fixed;
+}
+.rb-content .ProseMirror table td,
+.rb-content .ProseMirror table th {
+  position: relative;
+}
+.rb-content th {
+  text-align: left;
+  color: var(--text-primary);
+  font-weight: 500;
+  padding: 0.35rem 0.55rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+.rb-content td {
+  color: var(--text-body);
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.rb-content td p, .rb-content th p { margin-bottom: 0; }
+/* Tiptap wraps editable tables in .tableWrapper */
+.rb-content .tableWrapper { overflow-x: auto; margin-bottom: 1rem; }
+.rb-content .tableWrapper table { margin-bottom: 0; }
+
+/* editor-only chrome: placeholder text, selected table cell highlight */
+.rb-content .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-dim);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.rb-content .selectedCell {
+  background: var(--accent-10);
+}
+.rb-content .ProseMirror table .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: var(--accent);
+  pointer-events: auto;
+  cursor: col-resize;
+  z-index: 20;
+}
+.rb-content .ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
