@@ -144,8 +144,8 @@ CREATE TABLE IF NOT EXISTS pending_invites (
 );
 `);
 
-try { db.exec("ALTER TABLE users ADD COLUMN sub_team TEXT"); } catch {}
-try { db.exec("ALTER TABLE users ADD COLUMN data_residency_region TEXT DEFAULT 'EU (europe-west1) - GDPR Compliant'"); } catch {}
+try { db.exec("ALTER TABLE users ADD COLUMN sub_team TEXT"); } catch { }
+try { db.exec("ALTER TABLE users ADD COLUMN data_residency_region TEXT DEFAULT 'EU (europe-west1) - GDPR Compliant'"); } catch { }
 
 // Migration: existing deployments' users table won't have these columns yet.
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
@@ -363,7 +363,7 @@ app.post("/api/auth/profile", authMiddleware, (req, res) => {
 app.get("/api/users", authMiddleware, requireAdmin, (req, res) => {
   const rows = req.user.team_name
     ? db.prepare("SELECT id, name, email, role, team_name FROM users WHERE id = ? OR team_name = ? ORDER BY name")
-        .all(req.user.id, req.user.team_name)
+      .all(req.user.id, req.user.team_name)
     : db.prepare("SELECT id, name, email, role, team_name FROM users WHERE id = ?").all(req.user.id);
   res.json({ users: rows });
 });
@@ -645,11 +645,11 @@ app.get("/api/storage/:key", authMiddleware, (req, res) => {
   const ownerId = shared ? SHARED_OWNER : req.user.id;
   const storeKey = shared ? sharedKeyFor(req.user, req.params.key) : req.params.key;
   const row = db
-    .prepare("SELECT value FROM kv WHERE key = ? AND shared = ? AND owner_id = ?")
+    .prepare("SELECT value, updated_at FROM kv WHERE key = ? AND shared = ? AND owner_id = ?")
     .get(storeKey, shared ? 1 : 0, ownerId);
-  if (!row) return res.json({ key: req.params.key, value: null, shared });
-  res.json({ key: req.params.key, value: row.value, shared });
-});
+  if (!row) return res.json({ key: req.params.key, value: null, shared, updatedAt: null });
+  res.json({ key: req.params.key, value: row.value, shared, updatedAt: row.updated_at });
+})
 
 app.put("/api/storage/:key", authMiddleware, (req, res) => {
   const { value, shared } = req.body || {};
@@ -686,6 +686,94 @@ app.get("/api/storage", authMiddleware, (req, res) => {
     .prepare("SELECT key FROM kv WHERE shared = ? AND owner_id = ? AND key LIKE ?")
     .all(shared ? 1 : 0, ownerId, storePrefix + "%");
   res.json({ keys: rows.map((r) => r.key.slice(strip)), prefix, shared });
+});
+
+// ---------- Real-time Presence & Sync Detection ----------
+// In-memory presence map: pageId -> Map(userId -> { id, name, email, status, lastSeen })
+const pagePresence = new Map();
+const PRESENCE_TIMEOUT_MS = 15000; // 15 seconds without a heartbeat marks user inactive
+
+function prunePresence(pageId) {
+  const now = Date.now();
+  if (pageId) {
+    const usersMap = pagePresence.get(pageId);
+    if (usersMap) {
+      for (const [userId, info] of usersMap.entries()) {
+        if (now - info.lastSeen > PRESENCE_TIMEOUT_MS) {
+          usersMap.delete(userId);
+        }
+      }
+      if (usersMap.size === 0) pagePresence.delete(pageId);
+    }
+  } else {
+    for (const [pId, usersMap] of pagePresence.entries()) {
+      for (const [userId, info] of usersMap.entries()) {
+        if (now - info.lastSeen > PRESENCE_TIMEOUT_MS) {
+          usersMap.delete(userId);
+        }
+      }
+      if (usersMap.size === 0) pagePresence.delete(pId);
+    }
+  }
+}
+
+// Background cleanup every 30 seconds
+setInterval(() => prunePresence(), 30000);
+
+// Heartbeat endpoint: records presence and returns active users + lastModified timestamp
+app.post("/api/presence/heartbeat", authMiddleware, (req, res) => {
+  const { pageId, space, status = "viewing" } = req.body || {};
+  if (!pageId) {
+    return res.status(400).json({ error: "pageId is required" });
+  }
+
+  if (!pagePresence.has(pageId)) {
+    pagePresence.set(pageId, new Map());
+  }
+  const usersMap = pagePresence.get(pageId);
+  usersMap.set(req.user.id, {
+    id: req.user.id,
+    name: req.user.name || req.user.email.split("@")[0],
+    email: req.user.email,
+    status: status === "editing" ? "editing" : "viewing",
+    lastSeen: Date.now(),
+  });
+
+  prunePresence(pageId);
+
+  const activeUsers = Array.from(usersMap.values()).map(({ id, name, email, status }) => ({
+    id,
+    name,
+    email,
+    status,
+  }));
+
+  // Fetch updated_at timestamp of runbook_pages to allow sync detection
+  const isShared = space === "team";
+  const ownerId = isShared ? SHARED_OWNER : req.user.id;
+  const storeKey = isShared && req.user.team_name ? sharedKeyFor(req.user, "runbook_pages") : "runbook_pages";
+
+  const kvRow = db
+    .prepare("SELECT updated_at FROM kv WHERE key = ? AND shared = ? AND owner_id = ?")
+    .get(storeKey, isShared ? 1 : 0, ownerId);
+
+  res.json({
+    pageId,
+    activeUsers,
+    pagesUpdatedAt: kvRow?.updated_at || null,
+  });
+});
+
+// Explicit leave endpoint (called on page navigate or tab close)
+app.post("/api/presence/leave", authMiddleware, (req, res) => {
+  const { pageId } = req.body || {};
+  if (pageId && pagePresence.has(pageId)) {
+    pagePresence.get(pageId).delete(req.user.id);
+    if (pagePresence.get(pageId).size === 0) {
+      pagePresence.delete(pageId);
+    }
+  }
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => console.log(`Runbook backend listening on :${PORT}`));

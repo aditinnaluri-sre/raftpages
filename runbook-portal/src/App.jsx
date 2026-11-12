@@ -8,7 +8,7 @@ import {
   Sun, Moon, Monitor, KeyRound, UserX, UserPlus, FilePlus, FolderPlus, FolderInput, Copy, MoreVertical, Link as LinkIcon, ExternalLink, Calendar, Building2,
   MessageSquare, RotateCcw, History, CreditCard, Info, Lock, AtSign
 } from "lucide-react";
-import { auth, team as teamApi, files as filesApi, billing } from "./api.js";
+import { auth, team as teamApi, files as filesApi, billing, presence } from "./api.js";
 import { getStoredThemePref, setThemePref } from "./theme.js";
 import {
   googleSignIn, sendMagicLink, completeMagicLinkIfPresent, onAuthChange, signOut,
@@ -106,6 +106,8 @@ export default function RunbookPortal() {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [pageActiveUsers, setPageActiveUsers] = useState([]);
+
 
   useEffect(() => {
     if (!toast) return;
@@ -114,14 +116,14 @@ export default function RunbookPortal() {
   }, [toast]);
 
   useEffect(() => {
-    let unsub = () => {};
+    let unsub = () => { };
     // Safety fallback: ensure authChecked becomes true within 1000ms
     const safetyTimer = setTimeout(() => {
       setAuthChecked(true);
     }, 1000);
 
     (async () => {
-      try { await completeMagicLinkIfPresent(); } catch {}
+      try { await completeMagicLinkIfPresent(); } catch { }
       unsub = onAuthChange(async (fbUser) => {
         clearTimeout(safetyTimer);
         if (!fbUser) {
@@ -152,7 +154,7 @@ export default function RunbookPortal() {
     if (!currentUser) return;
 
     const markActive = () => {
-      try { localStorage.setItem(IDLE_ACTIVITY_KEY, String(Date.now())); } catch {}
+      try { localStorage.setItem(IDLE_ACTIVITY_KEY, String(Date.now())); } catch { }
     };
     markActive();
 
@@ -167,7 +169,7 @@ export default function RunbookPortal() {
 
     const checkInterval = setInterval(() => {
       let last = 0;
-      try { last = Number(localStorage.getItem(IDLE_ACTIVITY_KEY)) || 0; } catch {}
+      try { last = Number(localStorage.getItem(IDLE_ACTIVITY_KEY)) || 0; } catch { }
       if (last && Date.now() - last > IDLE_TIMEOUT_MS) {
         setIdleLoggedOut(true);
         signOut();
@@ -216,7 +218,7 @@ export default function RunbookPortal() {
               window.storage.set(PAGES_KEY, JSON.stringify(loadedPages), false),
               window.storage.set(FOLDERS_KEY, JSON.stringify(loadedFolders), false),
             ]);
-          } catch {}
+          } catch { }
         }
 
         setPages(loadedPages);
@@ -314,7 +316,7 @@ export default function RunbookPortal() {
     space === "team"
       ? { pages: teamPages || [], folders: teamFolders || [], persistPages: persistTeamPages, persistFolders: persistTeamFolders }
       : { pages: pages || [], folders: folders || [], persistPages: persist, persistFolders: persistFolders },
-  [pages, folders, teamPages, teamFolders, persist, persistFolders, persistTeamPages, persistTeamFolders]);
+    [pages, folders, teamPages, teamFolders, persist, persistFolders, persistTeamPages, persistTeamFolders]);
 
   const pageSpace = useCallback((pageId) => {
     if ((pages || []).some((p) => p.id === pageId)) return "personal";
@@ -330,19 +332,19 @@ export default function RunbookPortal() {
 
   const rootPagesOf = useCallback((space) =>
     spaceData(space).pages.filter((p) => !p.folderId && !p.parentId),
-  [spaceData]);
+    [spaceData]);
 
   const pagesInFolderOf = useCallback((space) => (folderId) =>
     spaceData(space).pages.filter((p) => p.folderId === folderId && !p.parentId),
-  [spaceData]);
+    [spaceData]);
 
   const childPagesOf = useCallback((space) => (parentId) =>
     spaceData(space).pages.filter((p) => p.parentId === parentId),
-  [spaceData]);
+    [spaceData]);
 
   const childFoldersOf = useCallback((space) => (parentId) =>
     spaceData(space).folders.filter((f) => f.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name)),
-  [spaceData]);
+    [spaceData]);
 
   const getDescendantFolderIds = useCallback((folderId) => {
     const space = folderSpace(folderId) || "personal";
@@ -718,6 +720,35 @@ export default function RunbookPortal() {
     null;
   const selectedSpace = selected ? (pageSpace(selected.id) || "personal") : null;
 
+  // Heartbeat loop for presence on the active page (PASTE HERE)
+  useEffect(() => {
+    const pageId = editing?.id || selected?.id;
+    if (!pageId || !currentUser) {
+      setPageActiveUsers([]);
+      return;
+    }
+
+    const space = editing ? (editing.__space || "personal") : (selectedSpace || "personal");
+    const status = editing ? "editing" : "viewing";
+
+    let active = true;
+    const sendBeat = async () => {
+      const res = await presence.heartbeat(pageId, space, status);
+      if (active && res?.activeUsers) {
+        setPageActiveUsers(res.activeUsers);
+      }
+    };
+
+    sendBeat();
+    const interval = setInterval(sendBeat, 4000); // Poll presence every 4s
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      presence.leave(pageId);
+    };
+  }, [editing?.id, selected?.id, editing ? "editing" : "viewing", currentUser, selectedSpace]);
+
   const initialHashApplied = React.useRef(false);
   const pagesReadyForRouting = pages !== null && (!currentUser?.team_name || teamPages !== null);
 
@@ -843,7 +874,7 @@ export default function RunbookPortal() {
     const stamped = { ...cleanEditing, parentId: landingParentId, updatedAt: now, updatedBy: currentUser.name, history };
 
     // Clear draft buffer for this page
-    try { localStorage.removeItem(`runbook_draft_${id}`); } catch {}
+    try { localStorage.removeItem(`runbook_draft_${id}`); } catch { }
 
     if (originalSpace && originalSpace !== targetSpace) {
       const from = spaceData(originalSpace);
@@ -1007,285 +1038,285 @@ export default function RunbookPortal() {
             </div>
           </>
         ) : (
-        <>
-        <div className="px-3 pt-3 flex items-center gap-1">
-          <NavTab active={view === "runbooks"} onClick={() => setView("runbooks")} icon={Folder} label="My Files" />
-        </div>
-
-        {view === "runbooks" && (
-          <div className="p-3 border-b border-[var(--border)]">
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search your files..."
-                className="w-full bg-[var(--panel-raised)] border border-[var(--border)] rounded-md pl-8 pr-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-60)]"
-              />
+          <>
+            <div className="px-3 pt-3 flex items-center gap-1">
+              <NavTab active={view === "runbooks"} onClick={() => setView("runbooks")} icon={Folder} label="My Files" />
             </div>
-          </div>
-        )}
 
-        <div className="flex-1 overflow-y-auto py-2">
-          {view !== "runbooks" && (
-            <p className="text-[var(--text-dim)] text-sm px-4 py-3">
-              Manage roles and sub-teams for your organization.
-            </p>
-          )}
-          {view === "runbooks" && loading && <p className="text-[var(--text-muted)] text-sm px-4 py-2">Loading your files…</p>}
-          {view === "runbooks" && !loading && pages?.length === 0 && folders?.length === 0 && (
-            <p className="text-[var(--text-dim)] text-sm px-4 py-3">No files yet — create your first page below.</p>
-          )}
-
-          {view === "runbooks" && (() => {
-            const renderSpaceSection = (space, canEditSpace, rootKey) => {
-              const kids = childFoldersOf(space);
-              const inFolder = pagesInFolderOf(space);
-              const childPages = childPagesOf(space);
-              const hasMatch = folderHasMatchOf(space);
-              const roots = rootPagesOf(space);
-
-              return (
-                <>
-                  {kids(null).map((folder) => (
-                    <FolderNode
-                      key={folder.id}
-                      folder={folder}
-                      depth={0}
-                      space={space}
-                      canEditSpace={canEditSpace}
-                      childFolders={kids}
-                      pagesInFolder={inFolder}
-                      childPages={childPages}
-                      query={query}
-                      filteredIds={filteredIds}
-                      folderHasMatch={hasMatch}
-                      collapsed={collapsed}
-                      toggleFolder={toggleFolder}
-                      selectedId={selectedId}
-                      editingId={editing?.id}
-                      onSelectPage={handleSelectPage}
-                      canEdit={canEditSpace}
-                      onFolderContextMenu={(e, f) => openFolderMenu(e, f, space, canEditSpace)}
-                      onPageContextMenu={(e, p) => openPageMenu(e, p, space, canEditSpace)}
-                      pageHref={pageUrl}
-                      creatingFolderUnder={creatingFolderUnder}
-                      newFolderName={newFolderName}
-                      setNewFolderName={setNewFolderName}
-                      onConfirmCreateFolder={confirmCreateFolder}
-                      onCancelCreateFolder={cancelCreateFolder}
-                      renaming={renaming}
-                      renameValue={renameValue}
-                      setRenameValue={setRenameValue}
-                      onConfirmRename={confirmRename}
-                      onCancelRename={cancelRename}
-                      openPageMenu={openPageMenu}
-                    />
-                  ))}
-
-                  {creatingFolderUnder === rootKey && (
-                    <div className="flex items-center gap-1.5 py-1 px-3">
-                      <input
-                        autoFocus
-                        value={newFolderName}
-                        onChange={(e) => setNewFolderName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") confirmCreateFolder(); if (e.key === "Escape") cancelCreateFolder(); }}
-                        placeholder="Folder name"
-                        className="flex-1 bg-[var(--panel-raised)] border border-[var(--accent-60)] rounded-md px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none"
-                      />
-                      <button onClick={confirmCreateFolder} className="text-[var(--accent)] hover:text-[var(--accent-hover)] p-1"><CheckCircle2 size={13} /></button>
-                      <button onClick={cancelCreateFolder} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1"><X size={13} /></button>
-                    </div>
-                  )}
-
-                  {roots.map((p) => (
-                    <PageNode
-                      key={p.id}
-                      page={p}
-                      depth={0}
-                      space={space}
-                      canEditSpace={canEditSpace}
-                      childPages={childPages}
-                      query={query}
-                      filteredIds={filteredIds}
-                      collapsed={collapsed}
-                      toggleFolder={toggleFolder}
-                      selectedId={selectedId}
-                      editingId={editing?.id}
-                      onSelectPage={handleSelectPage}
-                      onPageContextMenu={(e, page) => openPageMenu(e, page, space, canEditSpace)}
-                      pageHref={pageUrl}
-                      renaming={renaming}
-                      renameValue={renameValue}
-                      setRenameValue={setRenameValue}
-                      onConfirmRename={confirmRename}
-                      onCancelRename={cancelRename}
-                      openPageMenu={openPageMenu}
-                    />
-                  ))}
-                </>
-              );
-            };
-
-            return (
-              <>
-                <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[var(--text-dim)] hover:text-[var(--text-primary)] transition-colors select-none">
-                  <button
-                    onClick={() => setPersonalSpaceCollapsed((v) => !v)}
-                    className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold flex-1 text-left"
-                  >
-                    {personalSpaceCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                    <User size={11} /> Personal space
-                  </button>
-                  {canEdit && (
-                    <div className="flex items-center gap-0.5">
-                      <button onClick={() => startNewPage(null, "personal")} title="New personal page" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
-                        <FilePlus size={12} />
-                      </button>
-                      <button onClick={() => { setCreatingFolderUnder("root"); setNewFolderName(""); setPersonalSpaceCollapsed(false); }} title="New personal folder" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
-                        <FolderPlus size={12} />
-                      </button>
-                    </div>
-                  )}
+            {view === "runbooks" && (
+              <div className="p-3 border-b border-[var(--border)]">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search your files..."
+                    className="w-full bg-[var(--panel-raised)] border border-[var(--border)] rounded-md pl-8 pr-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-60)]"
+                  />
                 </div>
-                {!personalSpaceCollapsed && renderSpaceSection("personal", canEdit, "root")}
+              </div>
+            )}
 
-                {hasTeam && (
+            <div className="flex-1 overflow-y-auto py-2">
+              {view !== "runbooks" && (
+                <p className="text-[var(--text-dim)] text-sm px-4 py-3">
+                  Manage roles and sub-teams for your organization.
+                </p>
+              )}
+              {view === "runbooks" && loading && <p className="text-[var(--text-muted)] text-sm px-4 py-2">Loading your files…</p>}
+              {view === "runbooks" && !loading && pages?.length === 0 && folders?.length === 0 && (
+                <p className="text-[var(--text-dim)] text-sm px-4 py-3">No files yet — create your first page below.</p>
+              )}
+
+              {view === "runbooks" && (() => {
+                const renderSpaceSection = (space, canEditSpace, rootKey) => {
+                  const kids = childFoldersOf(space);
+                  const inFolder = pagesInFolderOf(space);
+                  const childPages = childPagesOf(space);
+                  const hasMatch = folderHasMatchOf(space);
+                  const roots = rootPagesOf(space);
+
+                  return (
+                    <>
+                      {kids(null).map((folder) => (
+                        <FolderNode
+                          key={folder.id}
+                          folder={folder}
+                          depth={0}
+                          space={space}
+                          canEditSpace={canEditSpace}
+                          childFolders={kids}
+                          pagesInFolder={inFolder}
+                          childPages={childPages}
+                          query={query}
+                          filteredIds={filteredIds}
+                          folderHasMatch={hasMatch}
+                          collapsed={collapsed}
+                          toggleFolder={toggleFolder}
+                          selectedId={selectedId}
+                          editingId={editing?.id}
+                          onSelectPage={handleSelectPage}
+                          canEdit={canEditSpace}
+                          onFolderContextMenu={(e, f) => openFolderMenu(e, f, space, canEditSpace)}
+                          onPageContextMenu={(e, p) => openPageMenu(e, p, space, canEditSpace)}
+                          pageHref={pageUrl}
+                          creatingFolderUnder={creatingFolderUnder}
+                          newFolderName={newFolderName}
+                          setNewFolderName={setNewFolderName}
+                          onConfirmCreateFolder={confirmCreateFolder}
+                          onCancelCreateFolder={cancelCreateFolder}
+                          renaming={renaming}
+                          renameValue={renameValue}
+                          setRenameValue={setRenameValue}
+                          onConfirmRename={confirmRename}
+                          onCancelRename={cancelRename}
+                          openPageMenu={openPageMenu}
+                        />
+                      ))}
+
+                      {creatingFolderUnder === rootKey && (
+                        <div className="flex items-center gap-1.5 py-1 px-3">
+                          <input
+                            autoFocus
+                            value={newFolderName}
+                            onChange={(e) => setNewFolderName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") confirmCreateFolder(); if (e.key === "Escape") cancelCreateFolder(); }}
+                            placeholder="Folder name"
+                            className="flex-1 bg-[var(--panel-raised)] border border-[var(--accent-60)] rounded-md px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none"
+                          />
+                          <button onClick={confirmCreateFolder} className="text-[var(--accent)] hover:text-[var(--accent-hover)] p-1"><CheckCircle2 size={13} /></button>
+                          <button onClick={cancelCreateFolder} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1"><X size={13} /></button>
+                        </div>
+                      )}
+
+                      {roots.map((p) => (
+                        <PageNode
+                          key={p.id}
+                          page={p}
+                          depth={0}
+                          space={space}
+                          canEditSpace={canEditSpace}
+                          childPages={childPages}
+                          query={query}
+                          filteredIds={filteredIds}
+                          collapsed={collapsed}
+                          toggleFolder={toggleFolder}
+                          selectedId={selectedId}
+                          editingId={editing?.id}
+                          onSelectPage={handleSelectPage}
+                          onPageContextMenu={(e, page) => openPageMenu(e, page, space, canEditSpace)}
+                          pageHref={pageUrl}
+                          renaming={renaming}
+                          renameValue={renameValue}
+                          setRenameValue={setRenameValue}
+                          onConfirmRename={confirmRename}
+                          onCancelRename={cancelRename}
+                          openPageMenu={openPageMenu}
+                        />
+                      ))}
+                    </>
+                  );
+                };
+
+                return (
                   <>
-                    <div className="flex items-center justify-between px-3 pt-3 pb-1 mt-2 border-t border-[var(--border)] text-[var(--text-dim)] hover:text-[var(--text-primary)] transition-colors select-none">
+                    <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[var(--text-dim)] hover:text-[var(--text-primary)] transition-colors select-none">
                       <button
-                        onClick={() => setTeamSpaceCollapsed((v) => !v)}
+                        onClick={() => setPersonalSpaceCollapsed((v) => !v)}
                         className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold flex-1 text-left"
                       >
-                        {teamSpaceCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                        <Users size={11} /> Team space
+                        {personalSpaceCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                        <User size={11} /> Personal space
                       </button>
-                      {canEditTeam && (
+                      {canEdit && (
                         <div className="flex items-center gap-0.5">
-                          <button onClick={() => startNewPage(null, "team")} title="New team page" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
+                          <button onClick={() => startNewPage(null, "personal")} title="New personal page" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
                             <FilePlus size={12} />
                           </button>
-                          <button onClick={() => { setCreatingFolderUnder("team-root"); setNewFolderName(""); setTeamSpaceCollapsed(false); }} title="New team folder" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
+                          <button onClick={() => { setCreatingFolderUnder("root"); setNewFolderName(""); setPersonalSpaceCollapsed(false); }} title="New personal folder" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
                             <FolderPlus size={12} />
                           </button>
                         </div>
                       )}
                     </div>
-                    {!teamSpaceCollapsed && (
+                    {!personalSpaceCollapsed && renderSpaceSection("personal", canEdit, "root")}
+
+                    {hasTeam && (
                       <>
-                        {teamPages === null ? (
-                          <p className="text-[var(--text-dim)] text-sm px-4 py-2">Loading team space…</p>
-                        ) : teamPages.length === 0 && (teamFolders || []).length === 0 && creatingFolderUnder !== "team-root" ? (
-                          <p className="text-[var(--text-dim)] text-sm px-4 py-2">
-                            {canEditTeam ? "No team pages yet — create one with the + above." : "No team pages yet."}
-                          </p>
-                        ) : null}
-                        {renderSpaceSection("team", canEditTeam, "team-root")}
+                        <div className="flex items-center justify-between px-3 pt-3 pb-1 mt-2 border-t border-[var(--border)] text-[var(--text-dim)] hover:text-[var(--text-primary)] transition-colors select-none">
+                          <button
+                            onClick={() => setTeamSpaceCollapsed((v) => !v)}
+                            className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold flex-1 text-left"
+                          >
+                            {teamSpaceCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                            <Users size={11} /> Team space
+                          </button>
+                          {canEditTeam && (
+                            <div className="flex items-center gap-0.5">
+                              <button onClick={() => startNewPage(null, "team")} title="New team page" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
+                                <FilePlus size={12} />
+                              </button>
+                              <button onClick={() => { setCreatingFolderUnder("team-root"); setNewFolderName(""); setTeamSpaceCollapsed(false); }} title="New team folder" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]">
+                                <FolderPlus size={12} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {!teamSpaceCollapsed && (
+                          <>
+                            {teamPages === null ? (
+                              <p className="text-[var(--text-dim)] text-sm px-4 py-2">Loading team space…</p>
+                            ) : teamPages.length === 0 && (teamFolders || []).length === 0 && creatingFolderUnder !== "team-root" ? (
+                              <p className="text-[var(--text-dim)] text-sm px-4 py-2">
+                                {canEditTeam ? "No team pages yet — create one with the + above." : "No team pages yet."}
+                              </p>
+                            ) : null}
+                            {renderSpaceSection("team", canEditTeam, "team-root")}
+                          </>
+                        )}
                       </>
                     )}
                   </>
-                )}
-              </>
-            );
-          })()}
+                );
+              })()}
 
-          {view === "runbooks" && query && filtered.length === 0 && (
-            <p className="text-[var(--text-muted)] text-sm px-4 py-6 text-center">No pages match "{query}"</p>
-          )}
-        </div>
-
-        {view === "runbooks" && canEdit && (
-          <div className="px-3 pb-2">
-            <button
-              onClick={() => { setCreatingFolderUnder("root"); setNewFolderName(""); }}
-              className="w-full flex items-center justify-center gap-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xs py-1.5 rounded-md hover:bg-[var(--panel-raised)] transition-colors"
-            >
-              <FolderPlus size={13} /> New folder
-            </button>
-          </div>
-        )}
-
-        {view === "runbooks" && (
-          <div className="p-3 border-t border-[var(--border)]">
-            <button
-              onClick={() => startNewPage()}
-              className="w-full flex items-center justify-center gap-1.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-[15px] font-medium py-2.5 rounded-md transition-colors"
-            >
-              <Plus size={15} /> New page
-            </button>
-          </div>
-        )}
-
-        <div className="px-3 pt-3 pb-1 border-t border-[var(--border)] flex items-center justify-between">
-          <span className="text-[var(--text-dim)] text-[10px] uppercase tracking-wider">Theme</span>
-          <ThemeToggle value={themePref} onChange={changeTheme} />
-        </div>
-
-        <div className="relative p-3 border-t border-[var(--border)]">
-          <button
-            onClick={() => setProfileMenuOpen((v) => !v)}
-            className="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-[var(--panel-raised)] transition-colors text-left focus:outline-none"
-          >
-            <div className="w-8 h-8 rounded-full bg-[var(--accent-15)] text-[var(--accent)] border border-[var(--accent-30)] flex items-center justify-center text-xs font-bold flex-shrink-0">
-              {initialsOf(currentUser.name)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[var(--text-primary)] text-sm font-medium truncate">{currentUser.name}</div>
-              <div className="text-[var(--text-muted)] text-xs flex items-center gap-1">
-                <RoleIcon size={10} /> {ROLE_META[role].label}
-              </div>
-            </div>
-            <ChevronDown size={14} className="text-[var(--text-muted)] flex-shrink-0" />
-          </button>
-
-          {profileMenuOpen && (
-            <div className="absolute bottom-full left-3 right-3 mb-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
-              <div className="px-3 py-2 border-b border-[var(--border)]">
-                <p className="text-[var(--text-primary)] text-xs font-semibold truncate">{currentUser.name}</p>
-                <p className="text-[var(--text-dim)] text-[10px] truncate">{currentUser.email}</p>
-              </div>
-              <button
-                onClick={() => { setProfileMenuOpen(false); setShowChangePasswordModal(true); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
-              >
-                <KeyRound size={13} className="text-[var(--accent)]" /> Change Password
-              </button>
-
-              {role === "admin" && (
-                <>
-                  <button
-                    onClick={() => { setProfileMenuOpen(false); setView("team"); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
-                  >
-                    <Users size={13} className="text-[var(--accent)]" /> Team management
-                  </button>
-                  <button
-                    onClick={() => { setProfileMenuOpen(false); setShowPaymentModal(true); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
-                  >
-                    <CreditCard size={13} className="text-[var(--accent)]" /> Upgrade / Secure Payment
-                  </button>
-                </>
+              {view === "runbooks" && query && filtered.length === 0 && (
+                <p className="text-[var(--text-muted)] text-sm px-4 py-6 text-center">No pages match "{query}"</p>
               )}
-
-              <button
-                onClick={() => { setProfileMenuOpen(false); setShowAboutModal(true); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
-              >
-                <Info size={13} className="text-[var(--accent)]" /> About RaftPages
-              </button>
-
-              <div className="border-t border-[var(--border)] my-1" />
-              <button
-                onClick={() => { setProfileMenuOpen(false); signOut(); setCurrentUser(null); setEditing(null); setSelectedId(null); setPages(null); setView("runbooks"); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--danger)] hover:bg-[var(--panel-raised)] transition-colors"
-              >
-                <LogOut size={13} /> Sign Out
-              </button>
             </div>
-          )}
-        </div>
-        </>
+
+            {view === "runbooks" && canEdit && (
+              <div className="px-3 pb-2">
+                <button
+                  onClick={() => { setCreatingFolderUnder("root"); setNewFolderName(""); }}
+                  className="w-full flex items-center justify-center gap-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xs py-1.5 rounded-md hover:bg-[var(--panel-raised)] transition-colors"
+                >
+                  <FolderPlus size={13} /> New folder
+                </button>
+              </div>
+            )}
+
+            {view === "runbooks" && (
+              <div className="p-3 border-t border-[var(--border)]">
+                <button
+                  onClick={() => startNewPage()}
+                  className="w-full flex items-center justify-center gap-1.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-[15px] font-medium py-2.5 rounded-md transition-colors"
+                >
+                  <Plus size={15} /> New page
+                </button>
+              </div>
+            )}
+
+            <div className="px-3 pt-3 pb-1 border-t border-[var(--border)] flex items-center justify-between">
+              <span className="text-[var(--text-dim)] text-[10px] uppercase tracking-wider">Theme</span>
+              <ThemeToggle value={themePref} onChange={changeTheme} />
+            </div>
+
+            <div className="relative p-3 border-t border-[var(--border)]">
+              <button
+                onClick={() => setProfileMenuOpen((v) => !v)}
+                className="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-[var(--panel-raised)] transition-colors text-left focus:outline-none"
+              >
+                <div className="w-8 h-8 rounded-full bg-[var(--accent-15)] text-[var(--accent)] border border-[var(--accent-30)] flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {initialsOf(currentUser.name)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[var(--text-primary)] text-sm font-medium truncate">{currentUser.name}</div>
+                  <div className="text-[var(--text-muted)] text-xs flex items-center gap-1">
+                    <RoleIcon size={10} /> {ROLE_META[role].label}
+                  </div>
+                </div>
+                <ChevronDown size={14} className="text-[var(--text-muted)] flex-shrink-0" />
+              </button>
+
+              {profileMenuOpen && (
+                <div className="absolute bottom-full left-3 right-3 mb-2 bg-[var(--panel)] border border-[var(--border)] rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                  <div className="px-3 py-2 border-b border-[var(--border)]">
+                    <p className="text-[var(--text-primary)] text-xs font-semibold truncate">{currentUser.name}</p>
+                    <p className="text-[var(--text-dim)] text-[10px] truncate">{currentUser.email}</p>
+                  </div>
+                  <button
+                    onClick={() => { setProfileMenuOpen(false); setShowChangePasswordModal(true); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
+                  >
+                    <KeyRound size={13} className="text-[var(--accent)]" /> Change Password
+                  </button>
+
+                  {role === "admin" && (
+                    <>
+                      <button
+                        onClick={() => { setProfileMenuOpen(false); setView("team"); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
+                      >
+                        <Users size={13} className="text-[var(--accent)]" /> Team management
+                      </button>
+                      <button
+                        onClick={() => { setProfileMenuOpen(false); setShowPaymentModal(true); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
+                      >
+                        <CreditCard size={13} className="text-[var(--accent)]" /> Upgrade / Secure Payment
+                      </button>
+                    </>
+                  )}
+
+                  <button
+                    onClick={() => { setProfileMenuOpen(false); setShowAboutModal(true); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--panel-raised)] transition-colors"
+                  >
+                    <Info size={13} className="text-[var(--accent)]" /> About RaftPages
+                  </button>
+
+                  <div className="border-t border-[var(--border)] my-1" />
+                  <button
+                    onClick={() => { setProfileMenuOpen(false); signOut(); setCurrentUser(null); setEditing(null); setSelectedId(null); setPages(null); setView("runbooks"); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--danger)] hover:bg-[var(--panel-raised)] transition-colors"
+                  >
+                    <LogOut size={13} /> Sign Out
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </aside>
 
@@ -1329,10 +1360,13 @@ export default function RunbookPortal() {
             titleError={titleError}
             titleErrorMsg={titleErrorMsg}
             setTitleError={setTitleError}
+            activeUsers={pageActiveUsers}
+            currentUser={currentUser}
           />
         ) : selected ? (
           <PageView
             page={selected}
+            activeUsers={pageActiveUsers}
             isTeamPage={selectedSpace === "team"}
             folderPathStr={fullPagePathStr(selected)}
             canEdit={selectedSpace === "team" ? canEditTeam : canEdit}
@@ -1477,11 +1511,10 @@ function ContextMenu({ x, y, items, onClose }) {
             key={i}
             onClick={() => { item.onClick(); onClose(); }}
             disabled={item.disabled}
-            className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              item.danger
-                ? "text-[var(--danger)] hover:bg-[var(--panel-raised)]"
-                : "text-[var(--text-primary)] hover:bg-[var(--panel-raised)]"
-            }`}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${item.danger
+              ? "text-[var(--danger)] hover:bg-[var(--panel-raised)]"
+              : "text-[var(--text-primary)] hover:bg-[var(--panel-raised)]"
+              }`}
           >
             {item.icon && <item.icon size={14} className={item.danger ? "" : "text-[var(--text-muted)]"} />}
             {item.label}
@@ -1551,9 +1584,8 @@ function ThemeToggle({ value, onChange }) {
           key={key}
           onClick={() => onChange(key)}
           title={label}
-          className={`w-7 h-7 rounded flex items-center justify-center transition-colors ${
-            value === key ? "bg-[var(--accent)] text-white" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-          }`}
+          className={`w-7 h-7 rounded flex items-center justify-center transition-colors ${value === key ? "bg-[var(--accent)] text-white" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            }`}
         >
           <Icon size={13} />
         </button>
@@ -1776,9 +1808,8 @@ function PageNode({
               e.preventDefault();
               onSelectPage(page);
             }}
-            className={`flex-1 min-w-0 flex items-center gap-2 py-1.5 text-[15px] text-left no-underline transition-colors ${
-              active ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
+            className={`flex-1 min-w-0 flex items-center gap-2 py-1.5 text-[15px] text-left no-underline transition-colors ${active ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              }`}
           >
             <StatusIcon size={13} style={{ color: STATUS_META[page.status]?.color }} className="flex-shrink-0" />
             <span className="truncate">{page.title}</span>
@@ -1832,9 +1863,8 @@ function NavTab({ active, onClick, icon: Icon, label }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-colors ${
-        active ? "bg-[var(--accent-15)] text-[var(--accent)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--panel-raised)]"
-      }`}
+      className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-colors ${active ? "bg-[var(--accent-15)] text-[var(--accent)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--panel-raised)]"
+        }`}
     >
       <Icon size={13} /> {label}
     </button>
@@ -2038,7 +2068,7 @@ function ChangePasswordModal({ onClose, setToast }) {
 function AboutModal({ onClose }) {
   const host = typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
   const isDevHost = host.includes("dev") || host.includes("localhost") || host === "127.0.0.1" || host.includes("staging");
-  
+
   const explicitEnv = import.meta.env.VITE_APP_ENV ? import.meta.env.VITE_APP_ENV.toLowerCase() : null;
   const currentEnv = explicitEnv || (isDevHost ? "development" : (import.meta.env.MODE || (import.meta.env.DEV ? "development" : "production"))).toLowerCase();
   const isProd = currentEnv === "production";
@@ -2401,7 +2431,7 @@ function LoginScreen({ onProfileComplete, idleLoggedOut, onDismissIdleNotice }) 
     try {
       if (mode === "signup") {
         await passwordSignUp(email, password, name);
-        try { await auth.completeProfile({ name, teamName, dataResidencyRegion }); } catch {}
+        try { await auth.completeProfile({ name, teamName, dataResidencyRegion }); } catch { }
       } else {
         await passwordSignIn(email, password);
       }
@@ -2551,7 +2581,7 @@ function LoginScreen({ onProfileComplete, idleLoggedOut, onDismissIdleNotice }) 
             className="w-full flex items-center justify-center gap-2.5 bg-[#4285F4] hover:bg-[#3367D6] active:bg-[#2851A3] disabled:opacity-60 text-white text-sm font-medium py-2.5 px-4 rounded-md transition-all shadow-sm mb-3"
           >
             <div className="w-5 h-5 bg-white rounded flex items-center justify-center p-0.5 shadow-xs">
-              <svg width="14" height="14" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.5-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.3-5.1l-6.6-5.6C29.7 35 27 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.6 39.6 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.7l6.6 5.6C41.9 35.8 44 30.3 44 24c0-1.3-.1-2.5-.4-3.5z"/></svg>
+              <svg width="14" height="14" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.5-.4-3.5z" /><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" /><path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.3-5.1l-6.6-5.6C29.7 35 27 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.6 39.6 16.3 44 24 44z" /><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.7l6.6 5.6C41.9 35.8 44 30.3 44 24c0-1.3-.1-2.5-.4-3.5z" /></svg>
             </div>
             Continue with Google
           </button>
@@ -2619,7 +2649,7 @@ function WorkLogView({ currentUser, setToast }) {
   const removeEntry = async (id) => {
     const next = (entries || []).filter((e) => e.id !== id);
     setEntries(next);
-    try { await window.storage.set(WORKLOG_KEY, JSON.stringify(next), false); } catch {}
+    try { await window.storage.set(WORKLOG_KEY, JSON.stringify(next), false); } catch { }
   };
 
   return (
@@ -3020,7 +3050,92 @@ function TeamView({ setToast, currentUser, onCurrentUserUpdate }) {
   );
 }
 
-function PageView({ page, isTeamPage, folderPathStr, canEdit, canDelete, onEdit, onNewSubpage, onDelete, onStatus, onRemoveAttachment, onCopyLink, pageHref, currentUser, setToast, onOpenBackups }) {
+// Color palette for collaborator avatars
+const COLLABORATOR_COLORS = [
+  "#3B82F6", // blue
+  "#10B981", // emerald
+  "#8B5CF6", // purple
+  "#F59E0B", // amber
+  "#EC4899", // pink
+  "#06B6D4", // cyan
+  "#E11D48", // rose
+  "#14B8A6", // teal
+];
+
+function getAvatarColor(idOrEmail) {
+  let hash = 0;
+  const str = String(idOrEmail || "");
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return COLLABORATOR_COLORS[Math.abs(hash) % COLLABORATOR_COLORS.length];
+}
+
+function getInitials(name, email) {
+  if (name && name.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (email || "??").slice(0, 2).toUpperCase();
+}
+
+// Presence Component: renders avatars and active editor badge
+function ActiveCollaborators({ activeUsers = [], currentUserId, isEditing = false }) {
+  // Show other users on this page (and tag current user)
+  if (!activeUsers || activeUsers.length === 0) return null;
+
+  const others = activeUsers.filter((u) => u.id !== currentUserId);
+  const activeEditor = others.find((u) => u.status === "editing");
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* Warning banner if someone else is actively editing */}
+      {activeEditor && !isEditing && (
+        <span className="flex items-center gap-1.5 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse">
+          <Edit3 size={11} />
+          <span className="font-medium">{activeEditor.name}</span> is editing
+        </span>
+      )}
+
+      {/* Stacked Avatars */}
+      <div className="flex items-center -space-x-1.5 overflow-hidden py-1">
+        {activeUsers.map((user) => {
+          const isMe = user.id === currentUserId;
+          const userColor = getAvatarColor(user.email || user.name);
+          const initials = getInitials(user.name, user.email);
+          const isUserEditing = user.status === "editing";
+
+          return (
+            <div
+              key={user.id}
+              title={`${user.name} (${user.email})${isMe ? " - You" : ""}${isUserEditing ? " (Editing...)" : " (Viewing)"}`}
+              className="relative group cursor-pointer"
+            >
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ${isUserEditing ? "ring-amber-400 animate-pulse" : "ring-[var(--panel)]"
+                  }`}
+                style={{ backgroundColor: userColor }}
+              >
+                {initials}
+              </div>
+              {/* Tooltip */}
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:flex flex-col items-center z-50 pointer-events-none">
+                <span className="bg-neutral-900 text-white text-[10px] rounded px-2 py-0.5 whitespace-nowrap shadow-lg">
+                  {user.name} {isMe ? "(You)" : ""} {isUserEditing ? "✏️ editing" : "👁️ viewing"}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PageView({ page, isTeamPage, folderPathStr, canEdit, canDelete, onEdit, onNewSubpage, onDelete, onStatus, onRemoveAttachment, onCopyLink, pageHref, currentUser, setToast, onOpenBackups, activeUsers }) {
   const Meta = STATUS_META[page.status];
   const historyCount = page.history?.length || 0;
 
@@ -3040,6 +3155,8 @@ function PageView({ page, isTeamPage, folderPathStr, canEdit, canDelete, onEdit,
             {page.title}
           </h1>
           <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+            {/* Active Collaborators Avatars */}
+            <ActiveCollaborators activeUsers={activeUsers} currentUserId={currentUser?.id} isEditing={false} />
             <a
               href={pageHref}
               target="_blank"
@@ -3096,9 +3213,8 @@ function PageView({ page, isTeamPage, folderPathStr, canEdit, canDelete, onEdit,
               <button
                 key={key}
                 onClick={() => onStatus(key)}
-                className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${
-                  page.status === key ? "border-transparent" : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
+                className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${page.status === key ? "border-transparent" : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
                 style={page.status === key ? { backgroundColor: `${m.color}1A`, color: m.color } : {}}
               >
                 <m.Icon size={11} /> {m.label}
@@ -3330,11 +3446,10 @@ function VersionHistoryModal({ page, onClose, onRestore }) {
                 <button
                   key={ver.id || idx}
                   onClick={() => setSelectedVersion(ver)}
-                  className={`w-full text-left p-2.5 rounded-lg text-xs transition-colors ${
-                    selectedVersion === ver
-                      ? "bg-[var(--accent-15)] text-[var(--accent)] border border-[var(--accent-30)] font-medium"
-                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--panel)] border border-transparent"
-                  }`}
+                  className={`w-full text-left p-2.5 rounded-lg text-xs transition-colors ${selectedVersion === ver
+                    ? "bg-[var(--accent-15)] text-[var(--accent)] border border-[var(--accent-30)] font-medium"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--panel)] border border-transparent"
+                    }`}
                 >
                   <div className="font-semibold text-[var(--text-primary)] truncate">{ver.title || page.title}</div>
                   <div className="text-[10px] text-[var(--text-dim)] font-mono mt-0.5">{fmtDateTime(ver.updatedAt)}</div>
@@ -3457,9 +3572,9 @@ function AttachmentNodeView({ node, deleteNode, editor }) {
   const isVideo = /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(name || "");
   const removeHandler = editor.isEditable
     ? async () => {
-        try { await filesApi.remove(id); } catch {}
-        deleteNode();
-      }
+      try { await filesApi.remove(id); } catch { }
+      deleteNode();
+    }
     : null;
   const Component = isImage ? ImageAttachment : isVideo ? VideoAttachment : FileAttachment;
   return (
@@ -3586,7 +3701,7 @@ function CodeBlockNodeView({ node, updateAttributes, editor }) {
     if (editor && editor.isEditable && typeof updateAttributes === "function") {
       try {
         updateAttributes({ collapsed: next });
-      } catch {}
+      } catch { }
     }
   };
 
@@ -3731,7 +3846,7 @@ function ImageAttachment({ id, name, size, onRemove }) {
 
   const handleDownload = async () => {
     setDownloading(true);
-    try { await filesApi.download(id, name); } catch {} finally { setDownloading(false); }
+    try { await filesApi.download(id, name); } catch { } finally { setDownloading(false); }
   };
 
   const handleDelete = async () => {
@@ -3779,9 +3894,8 @@ function ImageAttachment({ id, name, size, onRemove }) {
               key={w}
               type="button"
               onClick={(e) => { e.stopPropagation(); setImgWidth(w); }}
-              className={`px-1.5 py-0.5 text-[10px] rounded font-mono transition-colors ${
-                imgWidth === w ? "bg-[var(--accent)] text-white font-bold" : "text-[var(--text-secondary)] hover:bg-[var(--panel)]"
-              }`}
+              className={`px-1.5 py-0.5 text-[10px] rounded font-mono transition-colors ${imgWidth === w ? "bg-[var(--accent)] text-white font-bold" : "text-[var(--text-secondary)] hover:bg-[var(--panel)]"
+                }`}
             >
               {w}
             </button>
@@ -4010,11 +4124,10 @@ function EditorToolbarBtn({ icon: Icon, title, onClick, active }) {
       type="button"
       title={title}
       onClick={onClick}
-      className={`p-1.5 rounded transition-colors ${
-        active
-          ? "bg-[var(--accent-15)] text-[var(--accent)]"
-          : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)]"
-      }`}
+      className={`p-1.5 rounded transition-colors ${active
+        ? "bg-[var(--accent-15)] text-[var(--accent)]"
+        : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)]"
+        }`}
     >
       <Icon size={14} />
     </button>
@@ -4091,7 +4204,20 @@ function adjustColumnWidth(editor, delta) {
   }
 }
 
-function EditView({ editing, setEditing, folderTree, onCreateFolder, canChooseTeamSpace, onSave, onCancel, titleError, titleErrorMsg, setTitleError }) {
+function EditView({
+  editing,
+  setEditing,
+  folderTree,
+  onCreateFolder,
+  canChooseTeamSpace,
+  onSave,
+  onCancel,
+  titleError,
+  titleErrorMsg,
+  setTitleError,
+  activeUsers,
+  currentUser,
+}) {
   const set = (field) => (e) => setEditing({ ...editing, [field]: e.target.value });
   const setTitle = (e) => {
     setEditing({ ...editing, title: e.target.value });
@@ -4239,7 +4365,7 @@ function EditView({ editing, setEditing, folderTree, onCreateFolder, canChooseTe
           setDraftAvailable(parsed);
         }
       }
-    } catch {}
+    } catch { }
   }, [draftKey]);
 
   useEffect(() => {
@@ -4255,7 +4381,7 @@ function EditView({ editing, setEditing, folderTree, onCreateFolder, canChooseTe
           folderId: editing.folderId,
           savedAt: new Date().toISOString(),
         }));
-      } catch {}
+      } catch { }
     }, 500);
     return () => clearTimeout(timer);
   }, [editing]);
@@ -4333,7 +4459,7 @@ function EditView({ editing, setEditing, folderTree, onCreateFolder, canChooseTe
             <button
               type="button"
               onClick={() => {
-                try { if (draftKey) localStorage.removeItem(draftKey); } catch {}
+                try { if (draftKey) localStorage.removeItem(draftKey); } catch { }
                 setDraftAvailable(null);
               }}
               className="text-[var(--text-muted)] hover:text-[var(--text-primary)] px-1.5 py-1"
@@ -4346,7 +4472,10 @@ function EditView({ editing, setEditing, folderTree, onCreateFolder, canChooseTe
 
       {/* Top action header */}
       <div className="flex-shrink-0 flex items-center justify-between mb-4">
-        <span className="text-xs text-[var(--text-muted)] uppercase tracking-wider">{editing.id ? "Editing page" : "New page"}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[var(--text-muted)] uppercase tracking-wider">{editing.id ? "Editing page" : "New page"}</span>
+          <ActiveCollaborators activeUsers={activeUsers} currentUserId={currentUser?.id} isEditing={true} />
+        </div>
         <div className="flex items-center gap-2">
           <button onClick={onCancel} className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-1.5">
             <X size={13} /> Cancel
@@ -4363,9 +4492,8 @@ function EditView({ editing, setEditing, folderTree, onCreateFolder, canChooseTe
           value={editing.title}
           onChange={setTitle}
           placeholder="Page title"
-          className={`w-full bg-transparent text-[var(--text-primary)] text-3xl font-medium focus:outline-none placeholder-[var(--text-dim)] border-b pb-2 ${
-            titleError ? "border-[var(--danger)]" : "border-transparent"
-          }`}
+          className={`w-full bg-transparent text-[var(--text-primary)] text-3xl font-medium focus:outline-none placeholder-[var(--text-dim)] border-b pb-2 ${titleError ? "border-[var(--danger)]" : "border-transparent"
+            }`}
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
         />
         {titleError && <p className="text-[var(--danger)] text-xs mt-1 mb-2">{titleErrorMsg || "A title is required before this page can be saved."}</p>}

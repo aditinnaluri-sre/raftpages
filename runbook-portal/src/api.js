@@ -121,6 +121,29 @@ export const billing = {
   },
 };
 
+export const presence = {
+  async heartbeat(pageId, space, status = "viewing") {
+    try {
+      const res = await apiFetch("/api/presence/heartbeat", {
+        method: "POST",
+        body: JSON.stringify({ pageId, space, status }),
+      });
+      if (!res.ok) return null;
+      return res.json(); // { pageId, activeUsers, pagesUpdatedAt }
+    } catch {
+      return null;
+    }
+  },
+  async leave(pageId) {
+    try {
+      await apiFetch("/api/presence/leave", {
+        method: "POST",
+        body: JSON.stringify({ pageId }),
+      });
+    } catch { }
+  },
+};
+
 // Matches the window.storage interface: get/set/delete/list, each with
 // an optional `shared` flag. shared=true is team-wide; shared=false (default)
 // is private to the signed-in user.
