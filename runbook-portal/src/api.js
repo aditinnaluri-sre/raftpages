@@ -62,6 +62,11 @@ export const team = {
     if (!res.ok) throw new Error(data.error || "Failed to record invite");
     return data;
   },
+  async storageStats() {
+    const res = await apiFetch("/api/team/storage");
+    if (!res.ok) return null;
+    return res.json();
+  },
 };
 
 export const files = {

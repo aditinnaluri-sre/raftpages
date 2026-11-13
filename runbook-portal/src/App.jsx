@@ -6,7 +6,7 @@ import {
   NotebookPen, Loader2, Bold, Italic, Strikethrough, Underline, Link2, Table2,
   Code, Heading1, Heading2, Heading3, List, ListOrdered, Quote, IndentIncrease, IndentDecrease, Paperclip, Download, FileSpreadsheet, Image as ImageIcon, Mail, RefreshCw,
   Sun, Moon, Monitor, KeyRound, UserX, UserPlus, FilePlus, FolderPlus, FolderInput, Copy, MoreVertical, Link as LinkIcon, ExternalLink, Calendar, Building2,
-  MessageSquare, RotateCcw, History, CreditCard, Info, Lock, AtSign
+  MessageSquare, RotateCcw, History, CreditCard, Info, Lock, AtSign, HardDrive
 } from "lucide-react";
 import { auth, team as teamApi, files as filesApi, billing, presence } from "./api.js";
 import { getStoredThemePref, setThemePref } from "./theme.js";
@@ -107,6 +107,8 @@ export default function RunbookPortal() {
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [pageActiveUsers, setPageActiveUsers] = useState([]);
+  const lastServerUpdatedAtRef = React.useRef({ personal: null, team: null });
+  const [editingConflict, setEditingConflict] = useState(null);
 
 
   useEffect(() => {
@@ -221,6 +223,7 @@ export default function RunbookPortal() {
           } catch { }
         }
 
+        if (pagesRes?.updatedAt) lastServerUpdatedAtRef.current.personal = pagesRes.updatedAt;
         setPages(loadedPages);
         setFolders(loadedFolders);
       } catch {
@@ -237,6 +240,7 @@ export default function RunbookPortal() {
             window.storage.get(PAGES_KEY, true),
             window.storage.get(FOLDERS_KEY, true),
           ]);
+          if (tp?.updatedAt) lastServerUpdatedAtRef.current.team = tp.updatedAt;
           setTeamPages(tp ? JSON.parse(tp.value) : []);
           setTeamFolders(tf ? JSON.parse(tf.value) : []);
         } catch {
@@ -256,6 +260,7 @@ export default function RunbookPortal() {
     try {
       const result = await window.storage.set(PAGES_KEY, JSON.stringify(next), false);
       if (!result) throw new Error("save failed");
+      if (result.updatedAt) lastServerUpdatedAtRef.current.personal = result.updatedAt;
       return true;
     } catch {
       setPages(prev);
@@ -284,6 +289,7 @@ export default function RunbookPortal() {
     try {
       const result = await window.storage.set(PAGES_KEY, JSON.stringify(next), true);
       if (!result) throw new Error("save failed");
+      if (result.updatedAt) lastServerUpdatedAtRef.current.team = result.updatedAt;
       return true;
     } catch {
       setTeamPages(prev);
@@ -330,16 +336,19 @@ export default function RunbookPortal() {
     return null;
   }, [folders, teamFolders]);
 
+  const sortPagesByName = (a, b) =>
+    (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base", numeric: true });
+
   const rootPagesOf = useCallback((space) =>
-    spaceData(space).pages.filter((p) => !p.folderId && !p.parentId),
+    spaceData(space).pages.filter((p) => !p.folderId && !p.parentId).sort(sortPagesByName),
     [spaceData]);
 
   const pagesInFolderOf = useCallback((space) => (folderId) =>
-    spaceData(space).pages.filter((p) => p.folderId === folderId && !p.parentId),
+    spaceData(space).pages.filter((p) => p.folderId === folderId && !p.parentId).sort(sortPagesByName),
     [spaceData]);
 
   const childPagesOf = useCallback((space) => (parentId) =>
-    spaceData(space).pages.filter((p) => p.parentId === parentId),
+    spaceData(space).pages.filter((p) => p.parentId === parentId).sort(sortPagesByName),
     [spaceData]);
 
   const childFoldersOf = useCallback((space) => (parentId) =>
@@ -734,8 +743,37 @@ export default function RunbookPortal() {
     let active = true;
     const sendBeat = async () => {
       const res = await presence.heartbeat(pageId, space, status);
-      if (active && res?.activeUsers) {
+      if (!active) return;
+      if (res?.activeUsers) {
         setPageActiveUsers(res.activeUsers);
+      }
+      if (res?.pagesUpdatedAt) {
+        const lastKnown = lastServerUpdatedAtRef.current[space];
+        if (!lastKnown) {
+          lastServerUpdatedAtRef.current[space] = res.pagesUpdatedAt;
+        } else if (lastKnown !== res.pagesUpdatedAt) {
+          lastServerUpdatedAtRef.current[space] = res.pagesUpdatedAt;
+          try {
+            const freshRes = await window.storage.get(PAGES_KEY, space === "team");
+            if (freshRes?.value && active) {
+              const freshPages = JSON.parse(freshRes.value);
+              if (space === "team") {
+                setTeamPages(freshPages);
+              } else {
+                setPages(freshPages);
+              }
+              if (editing && editing.id === pageId) {
+                const serverPage = freshPages.find((p) => p.id === pageId);
+                if (serverPage && serverPage.updatedAt !== editing.updatedAt) {
+                  setEditingConflict({
+                    updatedBy: serverPage.updatedBy || "Another collaborator",
+                    updatedAt: serverPage.updatedAt,
+                  });
+                }
+              }
+            }
+          } catch { }
+        }
       }
     };
 
@@ -790,6 +828,7 @@ export default function RunbookPortal() {
   const toggleFolder = (id) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
 
   const startNewPage = (folderId, space = "personal") => {
+    setEditingConflict(null);
     setEditing({
       id: null,
       title: "",
@@ -805,6 +844,7 @@ export default function RunbookPortal() {
   };
 
   const startNewSubpage = (parentPage, space = "personal") => {
+    setEditingConflict(null);
     const targetSpace = space || pageSpace(parentPage.id) || "personal";
     setEditing({
       id: null,
@@ -822,6 +862,7 @@ export default function RunbookPortal() {
   };
 
   const startEditPage = (p) => {
+    setEditingConflict(null);
     setEditing({ ...p, parentId: p.parentId || null, __editKey: uid(), __space: pageSpace(p.id) || "personal" });
     setSelectedId(p.id);
   };
@@ -879,28 +920,62 @@ export default function RunbookPortal() {
     if (originalSpace && originalSpace !== targetSpace) {
       const from = spaceData(originalSpace);
       const to = spaceData(targetSpace);
-      const okRemove = await from.persistPages(from.pages.filter((p) => p.id !== id));
+
+      let freshFromPages = from.pages;
+      let freshToPages = to.pages;
+      try {
+        const [ffRes, ftRes] = await Promise.all([
+          window.storage.get(PAGES_KEY, originalSpace === "team"),
+          window.storage.get(PAGES_KEY, targetSpace === "team"),
+        ]);
+        if (ffRes?.value) freshFromPages = JSON.parse(ffRes.value);
+        if (ftRes?.value) freshToPages = JSON.parse(ftRes.value);
+      } catch { }
+
+      const okRemove = await from.persistPages(freshFromPages.filter((p) => p.id !== id));
       if (!okRemove) return;
-      const ok = await to.persistPages([{ ...stamped, id, folderId: null, parentId: null }, ...to.pages]);
+      const ok = await to.persistPages([{ ...stamped, id, folderId: null, parentId: null }, ...freshToPages.filter((p) => p.id !== id)]);
       if (!ok) return;
     } else {
       const { pages: allPages, persistPages: doPersist } = spaceData(targetSpace);
+
+      let freshPages = allPages;
+      try {
+        const freshRes = await window.storage.get(PAGES_KEY, targetSpace === "team");
+        if (freshRes?.value) {
+          freshPages = JSON.parse(freshRes.value);
+          if (freshRes.updatedAt) {
+            lastServerUpdatedAtRef.current[targetSpace] = freshRes.updatedAt;
+          }
+        }
+      } catch { }
+
       const next = cleanEditing.id
-        ? allPages.map((p) => (p.id === id ? { ...stamped, id } : p))
-        : [{ ...stamped, id }, ...allPages];
+        ? (freshPages.some((p) => p.id === id)
+          ? freshPages.map((p) => (p.id === id ? { ...stamped, id } : p))
+          : [{ ...stamped, id }, ...freshPages])
+        : [{ ...stamped, id }, ...freshPages];
       const ok = await doPersist(next);
       if (!ok) return;
     }
     setSelectedId(id);
     setToast(cleanEditing.id ? "Page saved" : "Page created");
     setEditing(null);
+    setEditingConflict(null);
   };
 
   const deletePage = async (id) => {
     const space = pageSpace(id) || "personal";
     const { pages: allPages, persistPages: doPersist } = spaceData(space);
     const descendantIds = new Set([id, ...getDescendantPageIds(id, space)]);
-    const nextPages = allPages.filter((p) => !descendantIds.has(p.id));
+
+    let freshPages = allPages;
+    try {
+      const freshRes = await window.storage.get(PAGES_KEY, space === "team");
+      if (freshRes?.value) freshPages = JSON.parse(freshRes.value);
+    } catch { }
+
+    const nextPages = freshPages.filter((p) => !descendantIds.has(p.id));
     setConfirmDelete(null);
     const ok = await doPersist(nextPages);
     if (!ok) return;
@@ -911,8 +986,15 @@ export default function RunbookPortal() {
   const setStatus = async (id, status) => {
     const space = pageSpace(id) || "personal";
     const { pages: allPages, persistPages: doPersist } = spaceData(space);
+
+    let freshPages = allPages;
+    try {
+      const freshRes = await window.storage.get(PAGES_KEY, space === "team");
+      if (freshRes?.value) freshPages = JSON.parse(freshRes.value);
+    } catch { }
+
     const now = new Date().toISOString();
-    const next = allPages.map((p) => (p.id === id ? { ...p, status, updatedAt: now, updatedBy: currentUser.name } : p));
+    const next = freshPages.map((p) => (p.id === id ? { ...p, status, updatedAt: now, updatedBy: currentUser.name } : p));
     const ok = await doPersist(next);
     if (ok) setToast(`Marked ${STATUS_META[status].label}`);
   };
@@ -1356,12 +1438,14 @@ export default function RunbookPortal() {
             onCreateFolder={(name, parentId) => createFolder(name, parentId, editing.__space || "personal")}
             canChooseTeamSpace={canEditTeam}
             onSave={saveEdit}
-            onCancel={() => setEditing(null)}
+            onCancel={() => { setEditing(null); setEditingConflict(null); }}
             titleError={titleError}
             titleErrorMsg={titleErrorMsg}
             setTitleError={setTitleError}
             activeUsers={pageActiveUsers}
             currentUser={currentUser}
+            editingConflict={editingConflict}
+            setEditingConflict={setEditingConflict}
           />
         ) : selected ? (
           <PageView
@@ -2704,6 +2788,93 @@ function WorkLogView({ currentUser, setToast }) {
   );
 }
 
+function fmtBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function StorageBar({ usedBytes, quotaBytes }) {
+  const pct = Math.min(100, Math.round((usedBytes / quotaBytes) * 100));
+  const color = pct >= 85 ? "bg-red-500" : pct >= 70 ? "bg-amber-400" : "bg-[var(--accent)]";
+  return (
+    <div>
+      <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+        <span>{fmtBytes(usedBytes)} used</span>
+        <span>{fmtBytes(quotaBytes)} total ({pct}%)</span>
+      </div>
+      <div className="w-full h-2 rounded-full bg-[var(--panel-raised)] overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function TeamStorageCard({ teamName }) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    teamApi.storageStats().then((s) => { setStats(s); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div className="mb-6 p-4 bg-[var(--panel)] border border-[var(--border)] rounded-xl flex items-center gap-2 text-xs text-[var(--text-muted)]">
+      <Loader2 size={13} className="animate-spin" /> Loading storage stats…
+    </div>
+  );
+  if (!stats) return null;
+
+  return (
+    <div className="mb-6 p-4 bg-[var(--panel)] border border-[var(--border)] rounded-xl space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+          <HardDrive size={15} className="text-[var(--accent)]" /> Team Storage & Capacity
+        </div>
+        <button onClick={() => setExpanded(v => !v)} className="text-xs text-[var(--accent)] hover:underline">
+          {expanded ? "Hide details" : "Show breakdown"}
+        </button>
+      </div>
+
+      <StorageBar usedBytes={stats.totalUsedBytes} quotaBytes={stats.quotaBytes} />
+
+      {expanded && (
+        <div className="space-y-3 pt-2 border-t border-[var(--border)]">
+          {/* Shared team assets row */}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[var(--text-secondary)] flex items-center gap-1.5"><Users size={11} /> Shared Runbooks & Pages</span>
+            <span className="font-mono text-[var(--text-primary)]">{fmtBytes(stats.sharedTeamBytes)}</span>
+          </div>
+
+          {/* Sub-team rows */}
+          {stats.subTeams.map((st) => (
+            <div key={st.name} className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-[var(--text-primary)] flex items-center gap-1.5">
+                  <Building2 size={11} className="text-[var(--accent)]" /> {st.name}
+                  <span className="text-[var(--text-muted)]">({st.memberCount} member{st.memberCount !== 1 ? "s" : ""})</span>
+                </span>
+                <span className="font-mono text-[var(--text-primary)]">{fmtBytes(st.usedBytes)}</span>
+              </div>
+              {/* Per-member within sub-team */}
+              <div className="pl-5 space-y-0.5">
+                {st.members.map((m) => (
+                  <div key={m.id} className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+                    <span>{m.name} <span className="text-[var(--text-dim)]">({m.role})</span></span>
+                    <span className="font-mono">{fmtBytes(m.usedBytes)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TeamView({ setToast, currentUser, onCurrentUserUpdate }) {
   const [users, setUsers] = useState(null);
   const [error, setError] = useState("");
@@ -2979,6 +3150,10 @@ function TeamView({ setToast, currentUser, onCurrentUserUpdate }) {
           </div>
           {inviteError && <p className="text-[var(--danger)] text-xs mt-2">{inviteError}</p>}
         </form>
+      )}
+
+      {currentUser.team_name && currentUser.role === "admin" && (
+        <TeamStorageCard teamName={currentUser.team_name} />
       )}
 
       {error && <p className="text-[var(--danger)] text-sm mb-4">{error}</p>}
@@ -4204,6 +4379,67 @@ function adjustColumnWidth(editor, delta) {
   }
 }
 
+// Automatically compress screenshots and uploaded images to preserve storage and bandwidth
+async function compressImageFile(file, options = {}) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  if (file.type === "image/svg+xml" || file.type === "image/gif") return file;
+
+  const {
+    maxWidth = 1920,
+    maxHeight = 1920,
+    quality = 0.82,
+    outputType = "image/webp",
+  } = options;
+
+  try {
+    let img;
+    if (typeof createImageBitmap === "function") {
+      img = await createImageBitmap(file);
+    } else {
+      img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = URL.createObjectURL(file);
+      });
+    }
+
+    let { width, height } = img;
+    if (width > maxWidth || height > maxHeight) {
+      const ratio = Math.min(maxWidth / width, maxHeight / height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, width, height);
+
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob((b) => resolve(b), outputType, quality);
+    });
+
+    if (!blob || blob.size >= file.size) {
+      return file; // Keep original if compression didn't reduce size
+    }
+
+    const originalBase = file.name.replace(/\.[^/.]+$/, "");
+    const ext = outputType === "image/webp" ? "webp" : "jpg";
+    const compressedFileName = `${originalBase}.${ext}`;
+
+    return new File([blob], compressedFileName, { type: outputType });
+  } catch (err) {
+    console.warn("Image compression skipped, using original:", err);
+    return file;
+  }
+}
+
 function EditView({
   editing,
   setEditing,
@@ -4217,6 +4453,8 @@ function EditView({
   setTitleError,
   activeUsers,
   currentUser,
+  editingConflict,
+  setEditingConflict,
 }) {
   const set = (field) => (e) => setEditing({ ...editing, [field]: e.target.value });
   const setTitle = (e) => {
@@ -4269,7 +4507,8 @@ function EditView({
     setUploading(true);
     setUploadError("");
     try {
-      const meta = await filesApi.upload(file);
+      const fileToUpload = await compressImageFile(file);
+      const meta = await filesApi.upload(fileToUpload);
       const kb = Math.max(1, Math.round(meta.size / 1024));
       editor?.chain().focus().insertContent({
         type: "attachment",
@@ -4467,6 +4706,25 @@ function EditView({
               Discard
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Concurrent Edit Warning Banner */}
+      {editingConflict && (
+        <div className="flex-shrink-0 mb-3 bg-amber-500/15 border border-amber-500/30 text-[var(--text-primary)] px-3.5 py-2.5 rounded-lg text-xs flex items-center justify-between gap-3 shadow-sm">
+          <span className="flex items-center gap-2 text-amber-500 font-medium">
+            <AlertTriangle size={15} className="flex-shrink-0" />
+            <span>
+              <strong>{editingConflict.updatedBy}</strong> just published changes to this page. You can still save to overwrite with your edits, or cancel to view their update.
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setEditingConflict(null)}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] px-2 py-1 text-xs"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

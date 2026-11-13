@@ -368,6 +368,55 @@ app.get("/api/users", authMiddleware, requireAdmin, (req, res) => {
   res.json({ users: rows });
 });
 
+// Team storage breakdown — admin only
+app.get("/api/team/storage", authMiddleware, requireAdmin, (req, res) => {
+  if (!req.user.team_name) return res.json({ error: "No team" });
+
+  const members = db.prepare(
+    "SELECT id, name, email, role, sub_team FROM users WHERE team_name = ? OR id = ?"
+  ).all(req.user.team_name, req.user.id);
+
+  const quotaBytes = TEAM_QUOTA_MB * 1024 * 1024;
+
+  // Shared team assets (pages, folders stored in kv with shared=1)
+  const sharedTextBytes = db.prepare(
+    "SELECT COALESCE(SUM(LENGTH(value)),0) AS s FROM kv WHERE shared = 1 AND key LIKE ?"
+  ).get(`team:${req.user.team_name}:%`).s;
+
+  // Per-member breakdown
+  const memberStats = members.map((m) => {
+    const fileBytes = db.prepare(
+      "SELECT COALESCE(SUM(size),0) AS s FROM files WHERE owner_id = ?"
+    ).get(m.id).s;
+    const textBytes = db.prepare(
+      "SELECT COALESCE(SUM(LENGTH(value)),0) AS s FROM kv WHERE owner_id = ? AND shared = 0"
+    ).get(m.id).s;
+    return { ...m, usedBytes: fileBytes + textBytes };
+  });
+
+  // Sub-team grouping
+  const subTeamMap = {};
+  for (const m of memberStats) {
+    const key = m.sub_team || "Unassigned";
+    if (!subTeamMap[key]) subTeamMap[key] = { name: key, memberCount: 0, usedBytes: 0, members: [] };
+    subTeamMap[key].memberCount++;
+    subTeamMap[key].usedBytes += m.usedBytes;
+    subTeamMap[key].members.push({ id: m.id, name: m.name, email: m.email, role: m.role, usedBytes: m.usedBytes });
+  }
+
+  const totalMemberBytes = memberStats.reduce((acc, m) => acc + m.usedBytes, 0);
+  const totalUsedBytes = totalMemberBytes + sharedTextBytes;
+
+  res.json({
+    quotaBytes,
+    totalUsedBytes,
+    sharedTeamBytes: sharedTextBytes,
+    memberCount: members.length,
+    subTeams: Object.values(subTeamMap).sort((a, b) => b.usedBytes - a.usedBytes),
+    members: memberStats.sort((a, b) => b.usedBytes - a.usedBytes),
+  });
+});
+
 app.post("/api/invite", authMiddleware, requireAdmin, (req, res) => {
   if (!req.user.team_name) {
     return res.status(400).json({ error: "Set a company/team name for your own account before inviting others" });
@@ -661,7 +710,10 @@ app.put("/api/storage/:key", authMiddleware, (req, res) => {
     `INSERT INTO kv (key, owner_id, shared, value, updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)
      ON CONFLICT(key, owner_id, shared) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
   ).run(storeKey, ownerId, isShared ? 1 : 0, String(value));
-  res.json({ key: req.params.key, value, shared: isShared });
+  const row = db
+    .prepare("SELECT updated_at FROM kv WHERE key = ? AND owner_id = ? AND shared = ?")
+    .get(storeKey, ownerId, isShared ? 1 : 0);
+  res.json({ key: req.params.key, value, shared: isShared, updatedAt: row?.updated_at });
 });
 
 app.delete("/api/storage/:key", authMiddleware, (req, res) => {
