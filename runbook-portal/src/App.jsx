@@ -3035,11 +3035,12 @@ function TeamView({ setToast, currentUser, onCurrentUserUpdate }) {
             try {
               await auth.updateProfile({ subTeam: newSubTeam.trim() });
               onCurrentUserUpdate({ ...currentUser, sub_team: newSubTeam.trim() });
-              setToast(`New sub-team "${newSubTeam.trim()}" created`);
+              setToast(`Sub-team "${newSubTeam.trim()}" created`);
               setNewSubTeam("");
               setShowAddTeam(false);
-            } catch {
-              setToast("Failed to create sub-team");
+              load(); // refresh member list
+            } catch (err) {
+              setToast(err.message || "Failed to create sub-team");
             }
           }}
           className="mb-6 p-4 bg-[var(--panel)] border border-[var(--border)] rounded-lg space-y-3 animate-in fade-in duration-150"

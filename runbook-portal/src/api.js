@@ -31,6 +31,16 @@ export const auth = {
     const data = await res.json();
     return data.user;
   },
+
+  async updateProfile({ subTeam, dataResidencyRegion } = {}) {
+    const res = await apiFetch("/api/auth/profile", {
+      method: "POST",
+      body: JSON.stringify({ subTeam, dataResidencyRegion }),
+    });
+    if (!res.ok) throw new Error("Couldn't update your profile");
+    const data = await res.json();
+    return data.user;
+  },
 };
 
 export const team = {
